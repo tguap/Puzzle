@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Puzzle</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      background-color: #f5f5f5;
+      margin: 0;
+      padding: 20px;
+      text-align: center;
+    }
+    h1 {
+      margin-bottom: 10px;
+    }
+    form {
+      margin-bottom: 20px;
+    }
+    label {
+      font-weight: bold;
+    }
+    input[type="text"],
+    input[type="number"] {
+      padding: 5px;
+      font-size: 1em;
+      margin: 5px;
+    }
+    button {
+      padding: 5px 10px;
+      font-size: 1em;
+      cursor: pointer;
+    }
+    /* Contenitore del puzzle: le dimensioni verranno calcolate in base all'immagine originale */
+    #puzzleContainer {
+      margin: 20px auto;
+    }
+    .cell {
+      box-sizing: border-box;
+      /* Inizialmente le celle hanno un bordo */
+      border: 1px solid #ccc;
+      transition: background-position 0.3s ease, transform 0.3s ease;
+      cursor: pointer;
+    }
+    .dragging {
+      opacity: 0.5;
+    }
+    .over {
+      outline: 3px dashed #ff6600;
+    }
+    /* Per evidenziare una tessera "bloccata" */
+    .locked {
+      border: 3px solid red;
+    }
+    #message {
+      margin-top: 20px;
+      font-size: 1.2em;
+      font-weight: bold;
+      min-height: 1.5em;
+    }
+    /* Controlli per impostare il numero di blocchi in larghezza */
+    #controls {
+      margin-bottom: 20px;
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <h1>Puzzle</h1>
+  <!-- Form per inserire l'URL da cui estrarre le immagini -->
+  <form id="urlForm">
+    <label for="urlInput">Insert URL:</label>
+    <input type="text" id="urlInput" placeholder="https://esempio.com" required>
+    <button type="submit">Extract images</button>
+  </form>
+
+  <!-- Controlli per impostare il numero di blocchi in larghezza -->
+  <div id="controls">
+    <label for="gridSizeInput">Number of blocks: </label>
+    <input type="number" id="gridSizeInput" value="3" min="2" max="10">
+    <button id="generateBtn">Generate Puzzle</button>
+  </div>
+
+  <!-- Contenitore del puzzle -->
+  <div id="puzzleContainer"></div>
+  <div id="message"></div>
+
+  <script>
+    /* Variabili globali */
+    let extractedImages = [];  // Array dei link delle immagini estratte
+    let selectedImage = "";    // Immagine scelta per il puzzle
+
+    // Parametri del puzzle (calcolati in base all'immagine originale)
+    let gridColumns, gridRows, pieceSize;
+    let positions = [];        // Array delle posizioni (piastrelle)
+    let moveCount = 0;         // Conta le mosse effettuate
+    let dragSourceCell = null; // Riferimento alla cella trascinata
+
+    // Dimensioni naturali dell'immagine (senza scaling)
+    let imgNaturalWidth = 0;
+    let imgNaturalHeight = 0;
+
+    /* --- Estrazione immagini dall'URL --- */
+    document.getElementById('urlForm').addEventListener('submit', async function(event) {
+      event.preventDefault(); // Evita il ricaricamento della pagina
+
+      const url = document.getElementById('urlInput').value.trim();
+      if (!url) return;
+
+      try {
+        // Usa AllOrigins per aggirare eventuali restrizioni CORS
+      const cacheBuster = `&_=${Date.now()}`;
+     const fullUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(url)}${cacheBuster}`;
+      
+        const response = await fetch(fullUrl);
+        if (!response.ok) throw new Error('Error on request');
+
+        const data = await response.json();
+        const htmlContent = data.contents;
+
+        // Analizza l'HTML per estrarre i tag <img>
+        const parser = new DOMParser();
+        const doc = parser.parseFromString(htmlContent, 'text/html');
+        const imgs = doc.querySelectorAll('img');
+
+        extractedImages = [];
+        imgs.forEach(img => {
+          if (img.src) extractedImages.push(img.src);
+        });
+
+        if (extractedImages.length === 0) {
+          alert("No image found.");
+          return;
+        }
+
+        // Se ci sono più di 6 immagini, elimina le ultime 5
+        if (extractedImages.length > 6) {
+          extractedImages = extractedImages.slice(0, extractedImages.length - 5);
+        }
+
+        // Mostra i controlli per impostare il numero di blocchi in larghezza
+        document.getElementById('controls').style.display = "block";
+
+        // Avvia il puzzle scegliendo una immagine casuale
+        initPuzzleWithRandomImage();
+      } catch (error) {
+        alert("Error: " + error.message);
+      }
+    });
+
+    /* --- Avvio puzzle con immagine casuale --- */
+    document.getElementById('generateBtn').addEventListener('click', function() {
+      initPuzzleWithRandomImage();
+    });
+
+    function initPuzzleWithRandomImage() {
+      if (extractedImages.length === 0) return;
+      // Scegli un'immagine casuale dalla lista estratta
+      selectedImage = extractedImages[Math.floor(Math.random() * extractedImages.length)];
+
+      // Carica l'immagine per ottenere le sue dimensioni naturali
+      const imgObj = new Image();
+      imgObj.onload = function() {
+        imgNaturalWidth = imgObj.naturalWidth;
+        imgNaturalHeight = imgObj.naturalHeight;
+        // Avvia l'inizializzazione del puzzle usando l'immagine nella sua risoluzione originale
+        initPuzzle();
+      };
+      imgObj.onerror = function() {
+        alert("Error on loading images.");
+      };
+      imgObj.src = selectedImage;
+    }
+
+    /* --- Inizializzazione del puzzle --- */
+    function initPuzzle() {
+      // Legge il numero di blocchi in larghezza (gridColumns) impostato dall'utente
+      gridColumns = parseInt(document.getElementById('gridSizeInput').value);
+
+      // Calcola la dimensione di ciascun blocco (pieceSize) in base alla larghezza naturale dell'immagine
+      pieceSize = Math.floor(imgNaturalWidth / gridColumns);
+      // Determina il numero di righe (gridRows) che entrano completamente nell'altezza dell'immagine
+      gridRows = Math.floor(imgNaturalHeight / pieceSize);
+
+      moveCount = 0;
+      // Crea l'array delle posizioni (da 0 a gridColumns*gridRows - 1) e lo mescola
+      positions = Array.from({ length: gridColumns * gridRows }, (_, i) => i);
+      shuffle(positions);
+      renderGrid();
+      showMessage("Puzzle generated! Solve the puzzle.");
+    }
+
+    // Algoritmo Fisher–Yates per mescolare un array
+    function shuffle(array) {
+      for (let i = array.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [array[i], array[j]] = [array[j], array[i]];
+      }
+    }
+
+    /* --- Creazione della griglia del puzzle --- */
+    function renderGrid() {
+      const container = document.getElementById('puzzleContainer');
+      container.innerHTML = ""; // Pulisce eventuali contenuti precedenti
+
+      // Imposta le dimensioni del contenitore in base all'immagine e al numero di blocchi
+      const containerWidth = gridColumns * pieceSize;
+      const containerHeight = gridRows * pieceSize;
+      container.style.width = containerWidth + "px";
+      container.style.height = containerHeight + "px";
+      container.style.display = "grid";
+      container.style.gridTemplateColumns = `repeat(${gridColumns}, 1fr)`;
+      container.style.gridGap = "2px";
+      container.style.border = "2px solid #333";
+      container.style.backgroundColor = "#333";
+
+      const numCells = gridColumns * gridRows;
+      for (let i = 0; i < numCells; i++) {
+        const cell = document.createElement('div');
+        cell.classList.add('cell');
+        cell.style.width = pieceSize + "px";
+        cell.style.height = pieceSize + "px";
+        // Imposta l'immagine di sfondo senza scaling, usando le dimensioni naturali
+        cell.style.backgroundImage = `url('${selectedImage}')`;
+        cell.style.backgroundSize = `${imgNaturalWidth}px ${imgNaturalHeight}px`;
+        // Salva l'indice corretto e il pezzo attuale (in base all'array mescolato)
+        cell.dataset.index = i;
+        cell.dataset.piece = positions[i];
+        // Stato iniziale: nessuna rotazione e tessera non bloccata
+        cell.dataset.rotation = "0";
+        cell.dataset.locked = "false";
+
+        // Imposta la porzione dell'immagine da mostrare
+        updateCell(cell, i);
+
+        // Abilita il drag & drop (se la tessera non è bloccata)
+        cell.draggable = true;
+        cell.addEventListener('dragstart', onDragStart);
+        cell.addEventListener('dragover', onDragOver);
+        cell.addEventListener('dragenter', onDragEnter);
+        cell.addEventListener('dragleave', onDragLeave);
+        cell.addEventListener('drop', onDrop);
+        cell.addEventListener('dragend', onDragEnd);
+        // Doppio clic per correggere una eventuale rotazione
+        cell.addEventListener('dblclick', onDblClick);
+        // Clic semplice per sbloccare una tessera eventualmente bloccata
+        cell.addEventListener('click', onClickCell);
+
+        container.appendChild(cell);
+      }
+    }
+
+    // Aggiorna la visualizzazione di una cella in base al pezzo corrente
+    function updateCell(cell, index) {
+      const piece = positions[index];
+      cell.dataset.piece = piece;
+      // Calcola la riga e la colonna del pezzo in base al numero di blocchi in larghezza
+      const pieceRow = Math.floor(piece / gridColumns);
+      const pieceCol = piece % gridColumns;
+      // Imposta il background-position per mostrare la porzione corretta dell'immagine
+      cell.style.backgroundPosition = `-${pieceCol * pieceSize}px -${pieceRow * pieceSize}px`;
+      const rotation = cell.dataset.rotation || "0";
+      cell.style.transform = `rotate(${rotation}deg)`;
+    }
+
+    /* --- Gestione del Drag & Drop --- */
+    function onDragStart(e) {
+      if (e.currentTarget.dataset.locked === "true") {
+        e.preventDefault();
+        return;
+      }
+      dragSourceCell = e.currentTarget;
+      e.dataTransfer.effectAllowed = "move";
+      // Necessario per la compatibilità (es. Firefox)
+      e.dataTransfer.setData("text/plain", "");
+      dragSourceCell.classList.add("dragging");
+    }
+
+    function onDragOver(e) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+    }
+
+    function onDragEnter(e) {
+      e.preventDefault();
+      e.currentTarget.classList.add("over");
+    }
+
+    function onDragLeave(e) {
+      e.currentTarget.classList.remove("over");
+    }
+
+    function onDrop(e) {
+      e.stopPropagation();
+      const dropTargetCell = e.currentTarget;
+      if (dropTargetCell.dataset.locked === "true") return false;
+      if (dragSourceCell && dragSourceCell !== dropTargetCell) {
+        const indexSource = parseInt(dragSourceCell.dataset.index);
+        const indexTarget = parseInt(dropTargetCell.dataset.index);
+        // Scambia i pezzi nell'array delle posizioni
+        [positions[indexSource], positions[indexTarget]] = [positions[indexTarget], positions[indexSource]];
+        updateCell(dragSourceCell, indexSource);
+        updateCell(dropTargetCell, indexTarget);
+        moveCount++;
+        checkSolved();
+      }
+      dropTargetCell.classList.remove("over");
+      return false;
+    }
+
+    function onDragEnd(e) {
+      e.currentTarget.classList.remove("dragging");
+      document.querySelectorAll('.cell').forEach(cell => cell.classList.remove("over"));
+    }
+
+    /* --- Gestione di eventuali imprevisti (rotazione e blocco) --- */
+    function onDblClick(e) {
+      const cell = e.currentTarget;
+      if (cell.dataset.rotation !== "0") {
+        cell.dataset.rotation = "0";
+        cell.style.transform = "rotate(0deg)";
+        showMessage("Correct rotation!");
+        checkSolved();
+      }
+    }
+
+    function onClickCell(e) {
+      const cell = e.currentTarget;
+      if (cell.dataset.locked === "true") {
+        cell.dataset.locked = "false";
+        cell.classList.remove("locked");
+        cell.draggable = true;
+        showMessage("Cell unlock!");
+        checkSolved();
+      }
+    }
+
+    /* --- Verifica se il puzzle è stato risolto --- */
+    function checkSolved() {
+      const cells = document.querySelectorAll('.cell');
+      for (const cell of cells) {
+        const index = parseInt(cell.dataset.index);
+        const piece = parseInt(cell.dataset.piece);
+        const rotation = cell.dataset.rotation || "0";
+        const locked = cell.dataset.locked;
+        if (piece !== index || rotation !== "0" || locked === "true") {
+          document.getElementById("message").textContent = "";
+          return;
+        }
+      }
+      showMessage("GG! You solved the puzzle!");
+      // Rimuove i bordi delle celle in modo da visualizzare l'immagine completa senza linee
+      cells.forEach(cell => cell.style.border = "none");
+      const container = document.getElementById('puzzleContainer');
+      container.style.gridGap = "0px";
+      container.style.border = "0px solid #333";
+      document.getElementById('urlForm').dispatchEvent(new Event('submit'));
+      // Attende 3 secondi prima di avviare un nuovo puzzle con una nuova immagine
+      setTimeout(() => {
+        
+        initPuzzleWithRandomImage();
+      }, 3000);
+    }
+
+    /* --- Mostra un messaggio nell'area dedicata --- */
+    function showMessage(msg) {
+      const messageDiv = document.getElementById("message");
+      messageDiv.textContent = msg;
+      if (msg !== "GG! You solved the puzzle!") {
+        setTimeout(() => {
+          if (messageDiv.textContent === msg) messageDiv.textContent = "";
+        }, 3000);
+      }
+    }
+  </script>
+</body>
+</html>
