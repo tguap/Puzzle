@@ -71,13 +71,13 @@
   <!-- Form per inserire l'URL da cui estrarre le immagini -->
   <form id="urlForm">
     <label for="urlInput">Insert URL:</label>
-    <input type="text" id="urlInput" placeholder="https://esempio.com" required>
+    <input type="text" id="urlInput" placeholder="https://example.com" required>
     <button type="submit">Extract images</button>
   </form>
 
   <!-- Controlli per impostare il numero di blocchi in larghezza -->
   <div id="controls">
-    <label for="gridSizeInput">Number of blocks: </label>
+    <label for="gridSizeInput">Number of columns: </label>
     <input type="number" id="gridSizeInput" value="3" min="2" max="10">
     <button id="generateBtn">Generate Puzzle</button>
   </div>
@@ -126,7 +126,7 @@
 
         extractedImages = [];
         imgs.forEach(img => {
-          if (img.src) extractedImages.push(img.src);
+          if (img.src && img.height * img.width > 10000) extractedImages.push(img.src);
         });
 
         if (extractedImages.length === 0) {
@@ -134,10 +134,7 @@
           return;
         }
 
-        // Se ci sono più di 6 immagini, elimina le ultime 5
-        if (extractedImages.length > 6) {
-          extractedImages = extractedImages.slice(0, extractedImages.length - 5);
-        }
+
 
         // Mostra i controlli per impostare il numero di blocchi in larghezza
         document.getElementById('controls').style.display = "block";
@@ -158,7 +155,7 @@
       if (extractedImages.length === 0) return;
       // Scegli un'immagine casuale dalla lista estratta
       selectedImage = extractedImages[Math.floor(Math.random() * extractedImages.length)];
-
+selectedImage=extractedImages[extractedImages.length-1];
       // Carica l'immagine per ottenere le sue dimensioni naturali
       const imgObj = new Image();
       imgObj.onload = function() {
@@ -303,6 +300,9 @@
         updateCell(dragSourceCell, indexSource);
         updateCell(dropTargetCell, indexTarget);
         moveCount++;
+        if (moveCount % 3 === 0 && Math.random() < 0.5) {
+          triggerRandomEvent();
+        }
         checkSolved();
       }
       dropTargetCell.classList.remove("over");
@@ -331,7 +331,7 @@
         cell.dataset.locked = "false";
         cell.classList.remove("locked");
         cell.draggable = true;
-        showMessage("Cell unlock!");
+        showMessage("Tile unlock!");
         checkSolved();
       }
     }
@@ -355,23 +355,79 @@
       const container = document.getElementById('puzzleContainer');
       container.style.gridGap = "0px";
       container.style.border = "0px solid #333";
-      document.getElementById('urlForm').dispatchEvent(new Event('submit'));
+      
       // Attende 3 secondi prima di avviare un nuovo puzzle con una nuova immagine
       setTimeout(() => {
         
-        initPuzzleWithRandomImage();
+     document.getElementById('urlForm').dispatchEvent(new Event('submit'));
       }, 3000);
+    }
+
+
+function triggerRandomEvent() {
+      const eventTypes = ["randomSwap", "lockTile", "rotateTile"];
+      const chosenEvent = eventTypes[Math.floor(Math.random() * eventTypes.length)];
+      switch(chosenEvent) {
+        case "randomSwap":
+          triggerRandomSwap();
+          break;
+        case "lockTile":
+          triggerLockTile();
+          break;
+        case "rotateTile":
+          triggerRotateTile();
+          break;
+      }
+    }
+    
+     function triggerRandomSwap() {
+      const cells = Array.from(document.querySelectorAll('.cell')).filter(cell => cell.dataset.locked !== "true");
+      if (cells.length < 2) return;
+      const idx1 = Math.floor(Math.random() * cells.length);
+      let idx2;
+      do {
+        idx2 = Math.floor(Math.random() * cells.length);
+      } while (idx2 === idx1);
+      const cell1 = cells[idx1];
+      const cell2 = cells[idx2];
+      const index1 = parseInt(cell1.dataset.index);
+      const index2 = parseInt(cell2.dataset.index);
+      [positions[index1], positions[index2]] = [positions[index2], positions[index1]];
+      updateCell(cell1, index1);
+      updateCell(cell2, index2);
+      showMessage("Unexpected twist: two tiles have been suddenly swapped");
+    }
+
+    // IMPREVISTO 2: Blocco di una tessera (che poi si sblocca con un clic)
+    function triggerLockTile() {
+      const cells = Array.from(document.querySelectorAll('.cell')).filter(cell => cell.dataset.locked === "false");
+      if (cells.length === 0) return;
+      const randomCell = cells[Math.floor(Math.random() * cells.length)];
+      randomCell.dataset.locked = "true";
+      randomCell.classList.add("locked");
+      randomCell.draggable = false;
+      showMessage("Unexpected twist: a tile has been locked! Click it to unlock.");
+    }
+
+    // IMPREVISTO 3: Rotazione di una tessera (da correggere con doppio clic)
+    function triggerRotateTile() {
+      const cells = Array.from(document.querySelectorAll('.cell')).filter(cell => cell.dataset.rotation === "0" && cell.dataset.locked === "false");
+      if (cells.length === 0) return;
+      const randomCell = cells[Math.floor(Math.random() * cells.length)];
+      randomCell.dataset.rotation = "90";
+      randomCell.style.transform = "rotate(90deg)";
+      showMessage("Unexpected twist: a tile has been rotated! Double-click to straighten it.");
     }
 
     /* --- Mostra un messaggio nell'area dedicata --- */
     function showMessage(msg) {
       const messageDiv = document.getElementById("message");
       messageDiv.textContent = msg;
-      if (msg !== "GG! You solved the puzzle!") {
+      
         setTimeout(() => {
           if (messageDiv.textContent === msg) messageDiv.textContent = "";
         }, 3000);
-      }
+      
     }
   </script>
 </body>
